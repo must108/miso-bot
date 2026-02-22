@@ -171,6 +171,21 @@ class ChartOption:
             )
 
         return argument
+    
+class ServerRankingArgument(commands.Converter):
+    ALIASES = {
+        "score": "score",
+        "scrobble": "scrobble",
+    }
+
+    @classmethod
+    async def convert(cls, _ctx, argument: str):
+        key = argument.lower()
+        if key not in cls.ALIASES:
+            raise commands.BadArgument(
+                "Valid options are: `score`, `scrobble`."
+            )
+        return cls.ALIASES[key]
 
 
 class StrOrNp:
@@ -1622,13 +1637,25 @@ class LastFm(commands.Cog):
 
         await RowPaginator(content, rows).run(ctx)
 
-    @server.command(name="topartists", aliases=["ta"], usage="[timeframe]")
+    @server.command(name="topartists", aliases=["ta"], usage="[timeframe] ['score' | 'scrobble']")
     async def server_topartists(
         self,
         ctx: MisoContext,
-        timeframe: Annotated[Period, PeriodArgument] = Period.OVERALL,
+        *args: Union[
+            Annotated[Period, PeriodArgument],
+            Annotated[str, ServerRankingArgument],
+        ],
     ):
         """Combined top artists of server members"""
+        timeframe = Period.OVERALL
+        mode="score"
+
+        for arg in args: 
+            if isinstance(arg, Period):
+                timeframe = arg
+            else:
+                mode = arg
+
         data = await self.task_for_each_server_member(
             ctx.guild, self.api.user_get_top_artists, limit=100, period=timeframe
         )
@@ -1665,33 +1692,63 @@ class LastFm(commands.Cog):
                 except KeyError:
                     artist_map[name] = {"score": score, "playcount": playcount}
 
+        if mode == "score":
+            sort_key = "score"
+        else:
+            sort_key = "playcount"
+
         top_artists = sorted(
-            artist_map.items(), key=lambda x: x[1]["score"], reverse=True
+            artist_map.items(), key=lambda x: x[1][sort_key], reverse=True
         )[:100]
+
+        if not top_artists:
+            return await ctx.send("Nobody on this server has listened to anything!")
 
         rows = []
         for i, (artist, artist_data) in enumerate(top_artists, start=1):
-            rows.append(
-                f"`#{i:2}` **{artist_data['score'] / len(data):.2f}%** /"
-                f" **{artist_data['playcount']}** plays • **{artist}**"
-            )
+            if mode == "score":
+                rows.append(
+                    f"`#{i:2}` **{artist_data['score'] / len(data):.2f}%** /"
+                    f" **{artist_data['playcount']}** plays • **{artist}**"
+                )
+            else:
+                rows.append(
+                    f"`#{i:2}` **{artist_data['playcount']}** plays • **{artist}**"
+                )
+
+        if mode == "score":
+            footer = (f"Score calculated from top 100 artists of {len(data)} members")
+        else:
+            footer = (f"Ranked by scrobbles from top 100 artists of {len(data)} members")
 
         await self.paginated_user_stat_embed(
             ctx,
             rows,
             f"Top 100 Artists ({timeframe.display()})",
             image=await self.api.get_artist_image(top_artists[0][0]),
-            footer=f"Score calculated from top 100 artists of {len(data)} members",
+            footer=footer,
             server_target=True,
         )
 
-    @server.command(name="toptracks", aliases=["tt"], usage="[timeframe]")
+    @server.command(name="toptracks", aliases=["tt"], usage="[timeframe] ['score' | 'scrobble']")
     async def server_toptracks(
         self,
         ctx: MisoContext,
-        timeframe: Annotated[Period, PeriodArgument] = Period.OVERALL,
+        *args: Union[
+            Annotated[Period, PeriodArgument],
+            Annotated[str, ServerRankingArgument],
+        ]
     ):
         """Combined top tracks of server members"""
+        timeframe = Period.OVERALL
+        mode = "score"
+
+        for arg in args:
+            if isinstance(arg, Period):
+                timeframe = arg
+            else:
+                mode = arg
+
         data = await self.task_for_each_server_member(
             ctx.guild, self.api.user_get_top_tracks, limit=100, period=timeframe
         )
@@ -1734,33 +1791,63 @@ class LastFm(commands.Cog):
                         "url": track["url"],
                     }
 
+        if mode == "score":
+            sort_key = "score"
+        else:
+            sort_key = "playcount"
+
         top_tracks = sorted(
-            track_map.items(), key=lambda x: x[1]["score"], reverse=True
+            track_map.items(), key=lambda x: x[1][sort_key], reverse=True
         )[:100]
+
+        if not top_tracks:
+            return await ctx.send("Nobody on this server has listened to anything!")
 
         rows = []
         for i, (track, track_data) in enumerate(top_tracks, start=1):
-            rows.append(
-                f"`#{i:2}` **{track_data['score'] / len(data):.2f}%** /"
-                f" **{track_data['playcount']}** plays • {track}"
-            )
+            if mode == "score":
+                rows.append(
+                    f"`#{i:2}` **{track_data['score'] / len(data):.2f}%** /"
+                    f" **{track_data['playcount']}** plays • {track}"
+                )
+            else:
+                rows.append(
+                    f"`#{i:2}` **{track_data['playcount']}** plays • {track}"
+                )
+
+        if mode == "score":
+            footer = (f"Score calculated from top 100 tracks of {len(data)} members")
+        else:
+            footer = (f"Ranked by scrobbles from top 100 tracks of {len(data)} members")
 
         await self.paginated_user_stat_embed(
             ctx,
             rows,
             f"Top 100 Tracks ({timeframe.display()})",
             image=await self.api.scrape_track_image(top_tracks[0][1]["url"]),
-            footer=f"Score calculated from top 100 tracks of {len(data)} members",
+            footer=footer,
             server_target=True,
         )
 
-    @server.command(name="topalbums", aliases=["talb"], usage="[timeframe]")
+    @server.command(name="topalbums", aliases=["talb"], usage="[timeframe] ['score' | 'scrobble']")
     async def server_topalbums(
         self,
         ctx: MisoContext,
-        timeframe: Annotated[Period, PeriodArgument] = Period.OVERALL,
+        *args: Union[
+            Annotated[Period, PeriodArgument],
+            Annotated[str, ServerRankingArgument],
+        ],
     ):
         """Combined top albums of server members"""
+        timeframe = Period.OVERALL
+        mode = "score"
+
+        for arg in args:
+            if isinstance(arg, Period):
+                timeframe = arg
+            else:
+                mode = arg
+
         data = await self.task_for_each_server_member(
             ctx.guild, self.api.user_get_top_albums, limit=100, period=timeframe
         )
@@ -1803,23 +1890,41 @@ class LastFm(commands.Cog):
                         "image": album["image"][0]["#text"],
                     }
 
+        if mode == "score":
+            sort_key = "score"
+        else:
+            sort_key = "playcount"
+
         top_albums = sorted(
-            album_map.items(), key=lambda x: x[1]["score"], reverse=True
+            album_map.items(), key=lambda x: x[1][sort_key], reverse=True
         )[:100]
+
+        if not top_albums:
+            return await ctx.send("Nobody on this server has listened to anything!")
 
         rows = []
         for i, (album, album_data) in enumerate(top_albums, start=1):
-            rows.append(
-                f"`#{i:2}` **{album_data['score'] / len(data):.2f}%** /"
-                f" **{album_data['playcount']}** plays • {album}"
-            )
+            if mode == "score":
+                rows.append(
+                    f"`#{i:2}` **{album_data['score'] / len(data):.2f}%** /"
+                    f" **{album_data['playcount']}** plays • {album}"
+                )
+            else:
+                rows.append(
+                    f"`#{i:2}` **{album_data['playcount']}** plays • {album}"
+                )
+
+        if mode == "score":
+            footer = (f"Score calculated from top 100 albums of {len(data)} members")
+        else:
+            footer = (f"Ranked by scrobbles from top 100 albums of {len(data)} members")
 
         await self.paginated_user_stat_embed(
             ctx,
             rows,
             f"Top 100 Albums ({timeframe.display()})",
             image=LastFmImage.from_url(top_albums[0][1]["image"]),
-            footer=f"Score calculated from top 100 albums of {len(data)} members",
+            footer=footer,
             server_target=True,
         )
 
